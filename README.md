@@ -16,13 +16,13 @@ SuperPoint and LightGlue with TensorRT.
 
 ## Docker(Recommand)
 ```bash
-docker pull yuefan2022/tensorrt-ubuntu20.04-cuda11.6:latest
+docker pull yuefan2022/tensorrt-ubuntu22.04-cuda12.1:latest
 docker run -it --env DISPLAY=$DISPLAY --volume /tmp/.X11-unix:/tmp/.X11-unix --privileged --runtime nvidia --gpus all --volume ${PWD}:/workspace --workdir /workspace --name tensorrt yuefan2022/tensorrt-ubuntu20.04-cuda11.6:latest /bin/bash
 ```
 
 ## Environment Required
-* CUDA==11.6
-* TensorRT==8.4.1.5
+* CUDA==12.1
+* TensorRT==8.6.1.6
 * OpenCV>=4.0
 * EIGEN
 * yaml-cpp
@@ -36,15 +36,15 @@ python convert2onnx/convert_superglue_to_onnx.py --weight_file superglue_pth_fil
 
 ## Build and Run
 ```bash
-git clone https://github.com/yuefanhao/SuperPointSuperGlueAcceleration.git
-cd SuperPointSuperGlueAcceleration
+git clone https://github.com/yuefanhao/SuperPoint-LightGlue-TensorRT.git
+cd SuperPoint-LightGlue-TensorRT
 mkdir build
 cd build
 cmake ..
 make
 # test on image pairs 100 times, the output image will be saved in the build dir
-./superpointglue_image  ../config/config.yaml ../weights/ ${PWD}/../image/image0.png ${PWD}/../image/image1.png
+./superpoint_lightglue_image  ../config/config.yaml ../weights/ ${PWD}/../image/image0.png ${PWD}/../image/image1.png
 # test on the folder with image sequence, output images will be saved in the param assigned dir
-./superpointglue_sequence  ../config/config.yaml ../weights/ ${PWD}/../image/freiburg_sequence/ ${PWD}/../image/freiburg_sequence/match_images/
+./superpoint_lightglue_sequence  ../config/config.yaml ../weights/ ${PWD}/../image/freiburg_sequence/ ${PWD}/../image/freiburg_sequence/match_images/
 ```
 The default image size param is 320x240, if you need to modify the image size in the config file, you should delete the old .engine file in the weights dir.
