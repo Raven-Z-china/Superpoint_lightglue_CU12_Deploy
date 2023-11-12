@@ -49,19 +49,19 @@ bool SuperPointLightGlue::build() {
   }
   profile->setDimensions(superpoint_lightglue_config_.input_tensor_names[0].c_str(), nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims3(1, 1, 2));
   profile->setDimensions(superpoint_lightglue_config_.input_tensor_names[0].c_str(), nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims3(1, 512, 2));
-  profile->setDimensions(superpoint_lightglue_config_.input_tensor_names[0].c_str(), nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims3(1, 1024, 2));
+  profile->setDimensions(superpoint_lightglue_config_.input_tensor_names[0].c_str(), nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims3(1, 2000, 2));
 
   profile->setDimensions(superpoint_lightglue_config_.input_tensor_names[1].c_str(), nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims3(1, 1, 2));
   profile->setDimensions(superpoint_lightglue_config_.input_tensor_names[1].c_str(), nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims3(1, 512, 2));
-  profile->setDimensions(superpoint_lightglue_config_.input_tensor_names[1].c_str(), nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims3(1, 1024, 2));
+  profile->setDimensions(superpoint_lightglue_config_.input_tensor_names[1].c_str(), nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims3(1, 2000, 2));
 
   profile->setDimensions(superpoint_lightglue_config_.input_tensor_names[2].c_str(), nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims3(1, 1, 256));
   profile->setDimensions(superpoint_lightglue_config_.input_tensor_names[2].c_str(), nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims3(1, 512, 256));
-  profile->setDimensions(superpoint_lightglue_config_.input_tensor_names[2].c_str(), nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims3(1, 1024, 256));
+  profile->setDimensions(superpoint_lightglue_config_.input_tensor_names[2].c_str(), nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims3(1, 2000, 256));
 
   profile->setDimensions(superpoint_lightglue_config_.input_tensor_names[3].c_str(), nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims3(1, 1, 256));
   profile->setDimensions(superpoint_lightglue_config_.input_tensor_names[3].c_str(), nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims3(1, 512, 256));
-  profile->setDimensions(superpoint_lightglue_config_.input_tensor_names[3].c_str(), nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims3(1, 1024, 256));
+  profile->setDimensions(superpoint_lightglue_config_.input_tensor_names[3].c_str(), nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims3(1, 2000, 256));
 
   config->addOptimizationProfile(profile);
 

@@ -33,10 +33,10 @@ int main(int argc, char** argv) {
   }
   auto superpoint_lightglue = std::make_shared<SuperPointLightGlue>(configs.superpoint_lightglue_config);
   if (!superpoint_lightglue->build()) {
-    std::cerr << "Error in SuperGlue building engine. Please check your onnx model path." << std::endl;
+    std::cerr << "Error in LightGlue building engine. Please check your onnx model path." << std::endl;
     return 0;
   }
-  std::cout << "SuperPoint and SuperGlue inference engine build success." << std::endl;
+  std::cout << "SuperPoint and LightGlue inference engine build success." << std::endl;
 
   Eigen::Matrix<double, 258, Eigen::Dynamic> feature_points0;
   Eigen::Matrix<double, 1, Eigen::Dynamic> feature_scores0;
@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
   for (int index = 1; index < image_names.size(); ++index) {
     Eigen::Matrix<double, 258, Eigen::Dynamic> feature_points1;
     Eigen::Matrix<double, 1, Eigen::Dynamic> feature_scores1;
-    std::vector<cv::DMatch> superglue_matches;
+    std::vector<cv::DMatch> lightglue_matches;
     cv::Mat image1 = cv::imread(image_names[index], cv::IMREAD_GRAYSCALE);
     if (image1.empty()) continue;
     cv::resize(image1, image1, cv::Size(width, height));
@@ -70,9 +70,9 @@ int main(int argc, char** argv) {
       std::cerr << "Failed when extracting features from second image." << std::endl;
       return 0;
     }
-    superpoint_lightglue->matching_points(feature_points0, feature_points1, superglue_matches);
+    superpoint_lightglue->matching_points(feature_points0, feature_points1, lightglue_matches);
     auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     cv::Mat match_image;
     std::vector<cv::KeyPoint> keypoints0, keypoints1;
     for (size_t i = 0; i < feature_points0.cols(); ++i) {
@@ -87,7 +87,8 @@ int main(int argc, char** argv) {
       double y = feature_points1(1, i);
       keypoints1.emplace_back(x, y, 8, -1, score);
     }
-    VisualizeMatching(image0, keypoints0, image1, keypoints1, superglue_matches, match_image, duration.count());
+    double cost_time = duration.count() / 1000.0;
+    VisualizeMatching(image0, keypoints0, image1, keypoints1, lightglue_matches, match_image, cost_time);
     cv::imwrite(output_path + "/" + std::to_string(index) + ".png", match_image);
   }
 

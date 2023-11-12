@@ -72,20 +72,20 @@ struct Configs {
     superpoint_lightglue_config.depth_confidence = lightglue_node["depth_confidence"].as<double>();
     superpoint_lightglue_config.width_confidence = lightglue_node["width_confidence"].as<double>();
     superpoint_lightglue_config.dla_core = lightglue_node["dla_core"].as<int>();
-    YAML::Node superglue_input_tensor_names_node = lightglue_node["input_tensor_names"];
-    size_t superglue_num_input_tensor_names = superglue_input_tensor_names_node.size();
-    for (size_t i = 0; i < superglue_num_input_tensor_names; i++) {
-      superpoint_lightglue_config.input_tensor_names.push_back(superglue_input_tensor_names_node[i].as<std::string>());
+    YAML::Node lightglue_input_tensor_names_node = lightglue_node["input_tensor_names"];
+    size_t lightglue_num_input_tensor_names = lightglue_input_tensor_names_node.size();
+    for (size_t i = 0; i < lightglue_num_input_tensor_names; i++) {
+      superpoint_lightglue_config.input_tensor_names.push_back(lightglue_input_tensor_names_node[i].as<std::string>());
     }
-    YAML::Node superglue_output_tensor_names_node = lightglue_node["output_tensor_names"];
-    size_t superglue_num_output_tensor_names = superglue_output_tensor_names_node.size();
-    for (size_t i = 0; i < superglue_num_output_tensor_names; i++) {
-      superpoint_lightglue_config.output_tensor_names.push_back(superglue_output_tensor_names_node[i].as<std::string>());
+    YAML::Node lightglue_output_tensor_names_node = lightglue_node["output_tensor_names"];
+    size_t lightglue_num_output_tensor_names = lightglue_output_tensor_names_node.size();
+    for (size_t i = 0; i < lightglue_num_output_tensor_names; i++) {
+      superpoint_lightglue_config.output_tensor_names.push_back(lightglue_output_tensor_names_node[i].as<std::string>());
     }
-    std::string superglue_onnx_file = lightglue_node["onnx_file"].as<std::string>();
-    std::string superglue_engine_file = lightglue_node["engine_file"].as<std::string>();
-    superpoint_lightglue_config.onnx_file = ConcatenateFolderAndFileName(model_dir, superglue_onnx_file);
-    superpoint_lightglue_config.engine_file = ConcatenateFolderAndFileName(model_dir, superglue_engine_file);
+    std::string lightglue_onnx_file = lightglue_node["onnx_file"].as<std::string>();
+    std::string lightglue_engine_file = lightglue_node["engine_file"].as<std::string>();
+    superpoint_lightglue_config.onnx_file = ConcatenateFolderAndFileName(model_dir, lightglue_onnx_file);
+    superpoint_lightglue_config.engine_file = ConcatenateFolderAndFileName(model_dir, lightglue_engine_file);
   }
 };
 

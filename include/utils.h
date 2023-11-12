@@ -60,9 +60,9 @@ static std::string ConcatenateFolderAndFileName(
 
 static void VisualizeMatching(const cv::Mat &image0, const std::vector<cv::KeyPoint> &keypoints0, const cv::Mat &image1,
                               const std::vector<cv::KeyPoint> &keypoints1,
-                              const std::vector<cv::DMatch> &superglue_matches, cv::Mat &output_image, double cost_time = -1) {
+                              const std::vector<cv::DMatch> &lightglue_matches, cv::Mat &output_image, double cost_time = -1) {
     if(image0.size != image1.size) return;
-    cv::drawMatches(image0, keypoints0, image1, keypoints1, superglue_matches, output_image, cv::Scalar(0, 255, 0), cv::Scalar(0, 0, 255));
+    cv::drawMatches(image0, keypoints0, image1, keypoints1, lightglue_matches, output_image, cv::Scalar(0, 255, 0), cv::Scalar(0, 0, 255));
     double sc = std::min(image0.rows / 640., 2.0);
     int ht = int(30 * sc);
     std::string title_str = "SuperPoint LightGlue TensorRT";
@@ -71,11 +71,11 @@ static void VisualizeMatching(const cv::Mat &image0, const std::vector<cv::KeyPo
     std::string feature_points_str = "Keypoints: " + std::to_string(keypoints0.size()) + ":" + std::to_string(keypoints1.size());
     cv::putText(output_image, feature_points_str, cv::Point(int(8*sc), ht*2), cv::FONT_HERSHEY_DUPLEX,1.0*sc, cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
     cv::putText(output_image, feature_points_str, cv::Point(int(8*sc), ht*2), cv::FONT_HERSHEY_DUPLEX,1.0*sc, cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
-    std::string match_points_str = "Matches: " + std::to_string(superglue_matches.size());
+    std::string match_points_str = "Matches: " + std::to_string(lightglue_matches.size());
     cv::putText(output_image, match_points_str, cv::Point(int(8*sc), ht*3), cv::FONT_HERSHEY_DUPLEX,1.0*sc, cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
     cv::putText(output_image, match_points_str, cv::Point(int(8*sc), ht*3), cv::FONT_HERSHEY_DUPLEX,1.0*sc, cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
     if(cost_time != -1) {
-        std::string time_str = "FPS: " + std::to_string(1000 / cost_time);
+        std::string time_str = "FPS: " + std::to_string(1000.0 / cost_time);
         cv::putText(output_image, time_str, cv::Point(int(8 * sc), ht * 4), cv::FONT_HERSHEY_DUPLEX, 1.0 * sc,
                     cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
         cv::putText(output_image, time_str, cv::Point(int(8 * sc), ht * 4), cv::FONT_HERSHEY_DUPLEX, 1.0 * sc,

@@ -38,3 +38,7 @@ cmake-build-release/
 .vscode/
 convert2onnx/venv
 convert2onnx/.idea
+convert2onnx/__pycache__
+image/freiburg_sequence/match_images
+image/match_image.png
+weights/*.engine

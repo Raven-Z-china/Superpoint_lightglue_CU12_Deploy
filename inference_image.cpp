@@ -52,12 +52,12 @@ int main(int argc, char **argv) {
 
   Eigen::Matrix<double, 258, Eigen::Dynamic> feature_points0, feature_points1;
   Eigen::Matrix<double, 1, Eigen::Dynamic> feature_scores0, feature_scores1;
-  std::vector<cv::DMatch> superglue_matches;
+  std::vector<cv::DMatch> lightglue_matches;
 
   long image0_time_count = 0;
   long image1_time_count = 0;
   long match_time_count = 0;
-  std::cout << "SuperPoint and SuperGlue test in 100 times." << std::endl;
+  std::cout << "SuperPoint and LightGlue test in 100 times." << std::endl;
   for (int i = 0; i < 100; ++i) {
     std::cout << "---------------------------------------------------------" << std::endl;
     auto start = std::chrono::high_resolution_clock::now();
@@ -86,7 +86,7 @@ int main(int argc, char **argv) {
     }
 
     start = std::chrono::high_resolution_clock::now();
-    superpoint_lightglue->matching_points(feature_points0, feature_points1, superglue_matches);
+    superpoint_lightglue->matching_points(feature_points0, feature_points1, lightglue_matches);
     end = std::chrono::high_resolution_clock::now();
     duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     if (i > 0) {
@@ -110,7 +110,7 @@ int main(int argc, char **argv) {
     keypoints1.emplace_back(x, y, 8, -1, score);
   }
 
-  //  cv::drawMatches(image0, keypoints0, image1, keypoints1, superglue_matches, match_image);
+  //  cv::drawMatches(image0, keypoints0, image1, keypoints1, lightglue_matches, match_image);
   //  cv::imwrite("match_image.png", match_image);
   //  visualize
   //  cv::imshow("match_image", match_image);

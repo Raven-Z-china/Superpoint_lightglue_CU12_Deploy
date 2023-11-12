@@ -1,6 +1,6 @@
 superpoint:
-  max_keypoints: 512
-  keypoint_threshold: 0.004
+  max_keypoints: 2000
+  keypoint_threshold: 0.01
   remove_borders: 4
   input_tensor_names:
     - "image"
@@ -15,8 +15,8 @@ superpoint_lightglue:
   image_width: 320
   image_height: 240
   filter_threshold: 0.1
-  depth_confidence: 0.95
-  width_confidence: 0.99
+  depth_confidence: -1
+  width_confidence: -1
   input_tensor_names:
     - "keypoints0"
     - "keypoints1"
