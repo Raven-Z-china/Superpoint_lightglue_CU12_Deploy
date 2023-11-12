@@ -83,7 +83,6 @@ bool SuperPoint::construct_network(TensorRTUniquePtr<nvinfer1::IBuilder> &builde
   if (!parsed) {
     return false;
   }
-  //    config->setMaxWorkspaceSize(512);
   config->setFlag(nvinfer1::BuilderFlag::kFP16);
   enableDLA(builder.get(), config.get(), super_point_config_.dla_core);
   return true;

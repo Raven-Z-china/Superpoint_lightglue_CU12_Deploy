@@ -10,10 +10,7 @@ import torch
 import cv2
 
 import superpoint
-
-
-def to_numpy(tensor):
-    return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
+from utils import to_numpy
 
 
 def main():
@@ -29,49 +26,51 @@ def main():
         os.mkdir(output_dir)
     weight_file = args.weight_file
 
+    superpoint_config = {
+        'descriptor_dim': 256,
+        'nms_radius': 4,
+        'keypoint_threshold': 0.005,
+        'max_keypoints': -1,
+        'remove_borders': 4,
+        'weights': weight_file,
+    }
+
     # load model
-    superpoint_model = superpoint.SuperPoint()
+    superpoint_model = superpoint.SuperPoint(superpoint_config).eval()
     pytorch_total_params = sum(p.numel() for p in superpoint_model.parameters())
-    print('total number ff params: ', pytorch_total_params)
+    print('Total number of params: ', pytorch_total_params)
 
-    # initialize model with the pretrained weights
-    map_location = lambda storage, loc: storage
-    if torch.cuda.is_available():
-        map_location = None
-    superpoint_model.load_state_dict(torch.load(weight_file, map_location=map_location))
-    superpoint_model.eval()
+    # image0 = cv2.imread("../image/image0.png", cv2.IMREAD_GRAYSCALE)
+    # image1 = cv2.imread("../image/image1.png", cv2.IMREAD_GRAYSCALE)
+    #
+    # image0 = cv2.resize(image0, (320, 240))
+    # image1 = cv2.resize(image1, (320, 240))
+    #
+    # image0 = torch.from_numpy(image0.astype(np.float32).reshape(-1, 1, 240, 320) / 255.0)
+    # image1 = torch.from_numpy(image1.astype(np.float32).reshape(-1, 1, 240, 320) / 255.0)
+    #
+    # image0_superpoint_output = superpoint_model(image0, True)
+    # image1_superpoint_output = superpoint_model(image1, True)
 
-    image0 = cv2.imread("../image/image0.png", cv2.IMREAD_GRAYSCALE)
-    image1 = cv2.imread("../image/image1.png", cv2.IMREAD_GRAYSCALE)
+    # torch.save(image0_superpoint_output, 'image0_superpoint_output.pt')
+    # torch.save(image1_superpoint_output, 'image1_superpoint_output.pt')
 
-    image0 = cv2.resize(image0, (320, 240))
-    image1 = cv2.resize(image1, (320, 240))
+    # create random input to the model for onnx trace
+    superpoint_input = torch.randn(1, 1, 240, 320)
 
-    image0 = torch.from_numpy(image0.astype(np.float32).reshape(-1, 1, 240, 320) / 255.0)
-    image1 = torch.from_numpy(image1.astype(np.float32).reshape(-1, 1, 240, 320) / 255.0)
-
-    image0_superpoint_out = superpoint_model(image0, True)
-    image1_superpoint_out = superpoint_model(image1, True)
-
-    # torch.save(image0_superpoint_out, 'image0_superpoint_out.pt')
-    # torch.save(image1_superpoint_out, 'image1_superpoint_out.pt')
-
-    # create input to the model for onnx trace
-    input = torch.randn(1, 1, 240, 320)
-
-    torch_out = superpoint_model(input)
+    torch_infer_output = superpoint_model(superpoint_input)
     onnx_filename = os.path.join(output_dir, weight_file.split("/")[-1].split(".")[0] + ".onnx")
 
     # export the model
     torch.onnx.export(superpoint_model,  # model being run
-                      input,  # model input (or a tuple for multiple inputs)
+                      superpoint_input,  # model input (or a tuple for multiple inputs)
                       onnx_filename,  # where to save the model (can be a file or file-like object)
                       export_params=True,  # store the trained parameter weights inside the model file
-                      opset_version=13,  # the ONNX version to export the model to
+                      opset_version=17,  # the ONNX version to export the model to
                       do_constant_folding=True,  # whether to execute constant folding for optimization
-                      input_names=['input'],  # the model input names
+                      input_names=['image'],  # the model input names
                       output_names=['scores', 'descriptors'],  # the model output names
-                      dynamic_axes={'input': {2: 'image_height', 3: "image_width"}}  # dynamic input names
+                      dynamic_axes={'image': {2: 'image_height', 3: "image_width"}}  # dynamic input names
                       )
 
     # check onnx conversion
@@ -80,13 +79,12 @@ def main():
     onnxruntime_session = onnxruntime.InferenceSession(onnx_filename)
 
     # compute ONNX Runtime output prediction
-    onnxruntime_inputs = {onnxruntime_session.get_inputs()[0].name: to_numpy(input)}
-    onnxruntime_outs = onnxruntime_session.run(None, onnxruntime_inputs)
+    onnxruntime_input = {onnxruntime_session.get_inputs()[0].name: to_numpy(superpoint_input)}
+    onnxruntime_infer_output = onnxruntime_session.run(None, onnxruntime_input)
 
     # compare ONNX Runtime and PyTorch results
-    np.testing.assert_allclose(to_numpy(torch_out[0]), onnxruntime_outs[0], rtol=1e-03,
-                               atol=1e-05)
-    np.testing.assert_allclose(to_numpy(torch_out[1]), onnxruntime_outs[1], rtol=1e-03, atol=1e-05)
+    np.testing.assert_allclose(to_numpy(torch_infer_output[0]), onnxruntime_infer_output[0], rtol=1e-03, atol=1e-05)
+    np.testing.assert_allclose(to_numpy(torch_infer_output[1]), onnxruntime_infer_output[1], rtol=1e-03, atol=1e-05)
 
     print("Exported model has been tested with ONNXRuntime, and the result looks good.")
 

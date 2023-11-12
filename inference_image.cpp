@@ -10,23 +10,15 @@
 #include "utils.h"
 
 int main(int argc, char **argv) {
-  //    if (argc != 5) {
-  //        std::cerr
-  //                << "./superpoint_lightglue_image config_path model_dir
-  //                first_image_absolutely_path second_image_absolutely_path"
-  //                << std::endl;
-  //        return 0;
-  //    }
+  if (argc != 5) {
+    std::cerr << "./superpoint_lightglue_image config_path model_dir first_image_absolutely_path second_image_absolutely_path" << std::endl;
+    return 0;
+  }
 
-  //  std::string config_path = argv[1];
-  //  std::string model_dir = argv[2];
-  //  std::string image0_path = argv[3];
-  //  std::string image1_path = argv[4];
-
-  std::string config_path = "/home/haoyuefan/Develop/SuperPoint-LightGlue-TensorRT/config/config.yaml";
-  std::string model_dir = "/home/haoyuefan/Develop/SuperPoint-LightGlue-TensorRT/weights/";
-  std::string image0_path = "/home/haoyuefan/Develop/SuperPoint-LightGlue-TensorRT/image/image0.png";
-  std::string image1_path = "/home/haoyuefan/Develop/SuperPoint-LightGlue-TensorRT/image/image1.png";
+  std::string config_path = argv[1];
+  std::string model_dir = argv[2];
+  std::string image0_path = argv[3];
+  std::string image1_path = argv[4];
 
   cv::Mat image0 = cv::imread(image0_path, cv::IMREAD_GRAYSCALE);
   cv::Mat image1 = cv::imread(image1_path, cv::IMREAD_GRAYSCALE);
@@ -66,7 +58,7 @@ int main(int argc, char **argv) {
   long image1_time_count = 0;
   long match_time_count = 0;
   std::cout << "SuperPoint and SuperGlue test in 100 times." << std::endl;
-  for (int i = 0; i < 1; ++i) {
+  for (int i = 0; i < 100; ++i) {
     std::cout << "---------------------------------------------------------" << std::endl;
     auto start = std::chrono::high_resolution_clock::now();
     if (!superpoint->infer(image0, feature_points0, feature_scores0)) {
@@ -74,11 +66,11 @@ int main(int argc, char **argv) {
       return 0;
     }
     auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     if (i > 0) {
       std::cout << "First image feature points number: " << feature_points0.cols() << std::endl;
       image0_time_count += duration.count();
-      std::cout << "First image infer cost " << image0_time_count / i << " MS" << std::endl;
+      std::cout << "First image infer cost " << image0_time_count / i / 1000.0 << " MS" << std::endl;
     }
     start = std::chrono::high_resolution_clock::now();
     if (!superpoint->infer(image1, feature_points1, feature_scores1)) {
@@ -86,20 +78,20 @@ int main(int argc, char **argv) {
       return 0;
     }
     end = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     if (i > 0) {
       std::cout << "Second image feature points number: " << feature_points1.cols() << std::endl;
       image1_time_count += duration.count();
-      std::cout << "Second image infer cost " << image1_time_count / i << " MS" << std::endl;
+      std::cout << "Second image infer cost " << image1_time_count / i / 1000.0 << " MS" << std::endl;
     }
 
     start = std::chrono::high_resolution_clock::now();
     superpoint_lightglue->matching_points(feature_points0, feature_points1, superglue_matches);
     end = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     if (i > 0) {
       match_time_count += duration.count();
-      std::cout << "Match image cost " << match_time_count / i << " MS" << std::endl;
+      std::cout << "Match image cost " << match_time_count / i / 1000.0 << " MS" << std::endl;
     }
   }
 
@@ -118,11 +110,11 @@ int main(int argc, char **argv) {
     keypoints1.emplace_back(x, y, 8, -1, score);
   }
 
-  cv::drawMatches(image0, keypoints0, image1, keypoints1, superglue_matches, match_image);
-  cv::imwrite("match_image.png", match_image);
+  //  cv::drawMatches(image0, keypoints0, image1, keypoints1, superglue_matches, match_image);
+  //  cv::imwrite("match_image.png", match_image);
   //  visualize
-  cv::imshow("match_image", match_image);
-  cv::waitKey(-1);
+  //  cv::imshow("match_image", match_image);
+  //  cv::waitKey(-1);
 
   return 0;
 }
