@@ -1,12 +1,10 @@
 # SuperPoint LightGlue TensorRT
 
-SuperPoint and LightGlue with TensorRT. Deploy with C++.
+SuperPoint and LightGlue with TensorRT. Deploy with C++. (Release tag v0.1.0 is available, the main branch has some bugs to fix.)
 
 ## Demo
 
-<img src="image/superpoint_lightglue_tensorrt.gif" width = "640" height = "240"  alt="match_image" border="10" />
-
-* This demo was tested on the RTX3080 GPU.
+- [x] TODO
 
 ## Baseline
 
