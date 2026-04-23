@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
     return 0;
   }
   cv::resize(image0, image0, cv::Size(width, height));
-  std::cout << "First image size: " << image0.cols << "x" << image0.rows << std::endl;
+  
   if (!superpoint->infer(image0, feature_points0, feature_scores0)) {
     std::cerr << "Failed when extracting features from first image." << std::endl;
     return 0;
@@ -64,15 +64,28 @@ int main(int argc, char** argv) {
     if (image1.empty()) continue;
     cv::resize(image1, image1, cv::Size(width, height));
 
-    std::cout << "Second image size: " << image1.cols << "x" << image1.rows << std::endl;
-    auto start = std::chrono::high_resolution_clock::now();
+    // SuperPoint inference timing
+    auto sp_start = std::chrono::high_resolution_clock::now();
     if (!superpoint->infer(image1, feature_points1, feature_scores1)) {
       std::cerr << "Failed when extracting features from second image." << std::endl;
       return 0;
     }
+    auto sp_end = std::chrono::high_resolution_clock::now();
+    auto sp_duration = std::chrono::duration_cast<std::chrono::microseconds>(sp_end - sp_start);
+
+    // LightGlue matching timing
+    auto lg_start = std::chrono::high_resolution_clock::now();
     superpoint_lightglue->matching_points(feature_points0, feature_points1, lightglue_matches);
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    auto lg_end = std::chrono::high_resolution_clock::now();
+    auto lg_duration = std::chrono::duration_cast<std::chrono::microseconds>(lg_end - lg_start);
+
+    // Output: image_idx, keypoints, matches, superpoint_time_ms, lightglue_time_ms
+    std::cout << index << " | " 
+              << feature_points0.cols() << " / " << feature_points1.cols() << " | "
+              << lightglue_matches.size() << " | "
+              << sp_duration.count() / 1000.0 << " ms | "
+              << lg_duration.count() / 1000.0 << " ms" << std::endl;
+
     cv::Mat match_image;
     std::vector<cv::KeyPoint> keypoints0, keypoints1;
     for (size_t i = 0; i < feature_points0.cols(); ++i) {
@@ -87,7 +100,7 @@ int main(int argc, char** argv) {
       double y = feature_points1(1, i);
       keypoints1.emplace_back(x, y, 8, -1, score);
     }
-    double cost_time = duration.count() / 1000.0;
+    double cost_time = (sp_duration.count() + lg_duration.count()) / 1000.0;
     VisualizeMatching(image0, keypoints0, image1, keypoints1, lightglue_matches, match_image, cost_time);
     cv::imwrite(output_path + "/" + std::to_string(index) + ".png", match_image);
   }

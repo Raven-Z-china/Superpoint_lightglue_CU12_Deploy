@@ -18,9 +18,16 @@ SuperPointLightGlue::SuperPointLightGlue(const SuperPointLightGlueConfig &superp
 }
 
 bool SuperPointLightGlue::build() {
+#if NV_TENSORRT_MAJOR >= 10
+  // Try to deserialize existing engine first for TensorRT 10
   if (deserialize_engine()) {
     return true;
   }
+#else
+  if (deserialize_engine()) {
+    return true;
+  }
+#endif
 
   auto builder = TensorRTUniquePtr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(gLogger.getTRTLogger()));
   if (!builder) {
@@ -111,22 +118,84 @@ bool SuperPointLightGlue::construct_network(TensorRTUniquePtr<nvinfer1::IBuilder
   if (!parsed) {
     return false;
   }
-  config->setFlag(nvinfer1::BuilderFlag::kFP16);
+  // Enable FP16 for faster inference
+  // config->setFlag(nvinfer1::BuilderFlag::kFP16);
   enableDLA(builder.get(), config.get(), superpoint_lightglue_config_.dla_core);
   return true;
 }
 
+#if NV_TENSORRT_MAJOR >= 10
+// TensorRT 10 helper to get tensor index from name
+static int getTensorIndex(nvinfer1::ICudaEngine* engine, const char* name) {
+    int nbTensors = engine->getNbIOTensors();
+    for (int i = 0; i < nbTensors; i++) {
+        if (strcmp(engine->getIOTensorName(i), name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+#endif
+
 bool SuperPointLightGlue::infer(const Eigen::Matrix<double, 258, Eigen::Dynamic> &features0, const Eigen::Matrix<double, 258, Eigen::Dynamic> &features1,
                                 Eigen::Matrix<int, Eigen::Dynamic, 2> &matches_index, Eigen::Matrix<double, Eigen::Dynamic, 1> &matches_score) {
+#if NV_TENSORRT_MAJOR >= 10
+  // For TensorRT 10, reuse context like SuperPoint does
+  if (!context_) {
+    context_ = TensorRTUniquePtr<nvinfer1::IExecutionContext>(engine_->createExecutionContext());
+    if (!context_) {
+      std::cerr << "Error: Failed to create context" << std::endl;
+      return false;
+    }
+  }
+  
+  // Store the actual keypoint counts for later use
+  int actual_keypoints_0 = features0.cols();
+  int actual_keypoints_1 = features1.cols();
+  
+  // Use fixed engine shape (500 keypoints) - need to clamp inputs to max
+  int engine_keypoints = 500;
+  
+  // IMPORTANT: Clamp keypoints to engine maximum to avoid buffer overflow
+  if (actual_keypoints_0 > engine_keypoints || actual_keypoints_1 > engine_keypoints) {
+    std::cerr << "Warning: Keypoints exceed engine capacity, clamping to " << engine_keypoints << std::endl;
+  }
+  actual_keypoints_0 = std::min(actual_keypoints_0, engine_keypoints);
+  actual_keypoints_1 = std::min(actual_keypoints_1, engine_keypoints);
+  
+  // Create sliced matrices to avoid buffer overflow in process_input
+  Eigen::Matrix<double, 258, Eigen::Dynamic> features0_sliced = features0.leftCols(actual_keypoints_0);
+  Eigen::Matrix<double, 258, Eigen::Dynamic> features1_sliced = features1.leftCols(actual_keypoints_1);
+  
+  assert(engine_->getNbIOTensors() == 5);
+#else
   if (!context_) {
     context_ = TensorRTUniquePtr<nvinfer1::IExecutionContext>(engine_->createExecutionContext());
     if (!context_) {
       return false;
     }
   }
-
   assert(engine_->getNbBindings() == 5);
+#endif
 
+#if NV_TENSORRT_MAJOR >= 10
+  // Set fixed input shapes matching the engine's optimization profile
+  context_->setInputShape(superpoint_lightglue_config_.input_tensor_names[0].c_str(), nvinfer1::Dims3(1, engine_keypoints, 2));
+  context_->setInputShape(superpoint_lightglue_config_.input_tensor_names[1].c_str(), nvinfer1::Dims3(1, engine_keypoints, 2));
+  context_->setInputShape(superpoint_lightglue_config_.input_tensor_names[2].c_str(), nvinfer1::Dims3(1, engine_keypoints, 256));
+  context_->setInputShape(superpoint_lightglue_config_.input_tensor_names[3].c_str(), nvinfer1::Dims3(1, engine_keypoints, 256));
+
+  // For TensorRT 10 with dynamic output shapes, the output shape is only valid AFTER execution
+  // Initialize with engine profile as fallback, will update after execution
+  scores_rows_ = engine_keypoints + 1;
+  scores_cols_ = engine_keypoints + 1;
+  
+  // Also store actual keypoint counts for filtering matches
+  keypoints_0_dims_.nbDims = 1;
+  keypoints_0_dims_.d[0] = actual_keypoints_0;
+  keypoints_1_dims_.nbDims = 1;
+  keypoints_1_dims_.d[0] = actual_keypoints_1;
+#else
   const int keypoints_0_index = engine_->getBindingIndex(superpoint_lightglue_config_.input_tensor_names[0].c_str());
   const int keypoints_1_index = engine_->getBindingIndex(superpoint_lightglue_config_.input_tensor_names[1].c_str());
   const int descriptors_0_index = engine_->getBindingIndex(superpoint_lightglue_config_.input_tensor_names[2].c_str());
@@ -141,20 +210,52 @@ bool SuperPointLightGlue::infer(const Eigen::Matrix<double, 258, Eigen::Dynamic>
   keypoints_1_dims_ = context_->getBindingDimensions(keypoints_1_index);
   descriptors_0_dims_ = context_->getBindingDimensions(descriptors_0_index);
   descriptors_1_dims_ = context_->getBindingDimensions(descriptors_1_index);
+#endif
 
   BufferManager buffers(engine_, 0, context_.get());
 
   ASSERT(superpoint_lightglue_config_.input_tensor_names.size() == 4);
-  if (!process_input(buffers, features0, features1)) {
+  if (!process_input(buffers, features0_sliced, features1_sliced)) {
     return false;
   }
 
+  #if NV_TENSORRT_MAJOR >= 10
+  // TensorRT 10: Set tensor addresses before execution
+  for (int i = 0; i < engine_->getNbIOTensors(); ++i) {
+    const char* name = engine_->getIOTensorName(i);
+    void* buffer = buffers.getDeviceBuffer(name);
+    context_->setTensorAddress(name, buffer);
+  }
   buffers.copyInputToDevice();
-
+  
+  // Pass bindings directly to executeV2
+  std::vector<void*> bindings;
+  for (int i = 0; i < engine_->getNbIOTensors(); ++i) {
+    bindings.push_back(buffers.getDeviceBuffer(engine_->getIOTensorName(i)));
+  }
+  
+  bool status = context_->executeV2(bindings.data());
+  if (!status) {
+    std::cerr << "Error: executeV2 failed" << std::endl;
+    return false;
+  }
+#else
+  buffers.copyInputToDevice();
   bool status = context_->executeV2(buffers.getDeviceBindings().data());
+#endif
   if (!status) {
     return false;
   }
+  
+  // Get output tensor shape after execution (valid in TensorRT 10 for dynamic outputs)
+#if NV_TENSORRT_MAJOR >= 10
+  nvinfer1::Dims output_scores_dims = context_->getTensorShape(superpoint_lightglue_config_.output_tensor_names[0].c_str());
+  if (output_scores_dims.nbDims > 0) {
+    scores_rows_ = output_scores_dims.d[1];
+    scores_cols_ = output_scores_dims.d[2];
+  }
+#endif
+
   buffers.copyOutputToHost();
 
   if (!process_output(buffers, matches_index, matches_score)) {
@@ -170,6 +271,19 @@ bool SuperPointLightGlue::process_input(const BufferManager &buffers, const Eige
   auto *descriptors_0_buffer = static_cast<float *>(buffers.getHostBuffer(superpoint_lightglue_config_.input_tensor_names[2]));
   auto *descriptors_1_buffer = static_cast<float *>(buffers.getHostBuffer(superpoint_lightglue_config_.input_tensor_names[3]));
 
+  // Get the buffer sizes from BufferManager
+  size_t keypoints_0_size = buffers.size(superpoint_lightglue_config_.input_tensor_names[0]) / sizeof(float);
+  size_t keypoints_1_size = buffers.size(superpoint_lightglue_config_.input_tensor_names[1]) / sizeof(float);
+  size_t descriptors_0_size = buffers.size(superpoint_lightglue_config_.input_tensor_names[2]) / sizeof(float);
+  size_t descriptors_1_size = buffers.size(superpoint_lightglue_config_.input_tensor_names[3]) / sizeof(float);
+  
+  // Zero-initialize all buffers (padding will be zeros)
+  std::fill(keypoints_0_buffer, keypoints_0_buffer + keypoints_0_size, 0.0f);
+  std::fill(keypoints_1_buffer, keypoints_1_buffer + keypoints_1_size, 0.0f);
+  std::fill(descriptors_0_buffer, descriptors_0_buffer + descriptors_0_size, 0.0f);
+  std::fill(descriptors_1_buffer, descriptors_1_buffer + descriptors_1_size, 0.0f);
+
+  // Copy actual keypoints and descriptors
   for (int colk0 = 0; colk0 < features0.cols(); ++colk0) {
     for (int rowk0 = 0; rowk0 < 2; ++rowk0) {
       keypoints_0_buffer[colk0 * 2 + rowk0] = features0(rowk0, colk0);
@@ -248,13 +362,47 @@ void SuperPointLightGlue::filter_matches(const Eigen::Matrix<double, Eigen::Dyna
 
 bool SuperPointLightGlue::process_output(const BufferManager &buffers, Eigen::Matrix<int, Eigen::Dynamic, 2> &matches_index, Eigen::Matrix<double, Eigen::Dynamic, 1> &matches_score) {
   auto *output_scores = static_cast<float *>(buffers.getHostBuffer(superpoint_lightglue_config_.output_tensor_names[0]));
-  int scores_rows = keypoints_0_dims_.d[1] + 1;
-  int scores_cols = keypoints_1_dims_.d[1] + 1;
+  
+  int scores_rows, scores_cols;
+  
+#if NV_TENSORRT_MAJOR >= 10
+  // Get the actual keypoint counts from keypoints_0_dims_ and keypoints_1_dims_
+  // These were set in infer() to store actual keypoint counts
+  int actual_keypoints_0 = keypoints_0_dims_.d[0];
+  int actual_keypoints_1 = keypoints_1_dims_.d[0];
+  scores_rows = actual_keypoints_0 + 1;
+  scores_cols = actual_keypoints_1 + 1;
+  
+  if (scores_rows <= 0 || scores_cols <= 0) {
+    std::cerr << "Error: Invalid output dimensions!" << std::endl;
+    return false;
+  }
+#else
+  // In TensorRT < 10, use input dimensions from context
+  if (keypoints_0_dims_.nbDims < 2 || keypoints_1_dims_.nbDims < 2) {
+    std::cerr << "Error: Invalid dimensions!" << std::endl;
+    return false;
+  }
+  
+  scores_rows = keypoints_0_dims_.d[1] + 1;
+  scores_cols = keypoints_1_dims_.d[1] + 1;
+#endif
+  
+  // The output buffer is [1, max_keypoints+1, max_keypoints+1] (501x501 for 500 keypoints)
+  // We need to use the actual engine output dimensions to avoid buffer overflow
+  int buffer_rows = scores_rows_;  // This is the actual engine output rows
+  int buffer_cols = scores_cols_;   // This is the actual engine output cols
+  
+  if (buffer_rows <= 0 || buffer_cols <= 0) {
+    std::cerr << "Error: Invalid buffer dimensions!" << std::endl;
+    return false;
+  }
+  
   Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> scores_matrix;
   scores_matrix.resize(scores_rows, scores_cols);
   for (int row = 0; row < scores_rows; ++row) {
     for (int col = 0; col < scores_cols; ++col) {
-      scores_matrix(row, col) = output_scores[row * scores_cols + col];
+      scores_matrix(row, col) = output_scores[row * buffer_cols + col];
     }
   }
   filter_matches(scores_matrix, matches_index, matches_score);

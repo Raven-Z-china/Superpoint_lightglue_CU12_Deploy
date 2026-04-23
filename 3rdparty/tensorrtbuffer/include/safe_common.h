@@ -110,7 +110,7 @@ namespace tensorrt_buffer
     {
         if (vecDim >= 0)
         {
-            dims.d[vecDim] = roundUp(dims.d[vecDim], comps);
+            dims.d[vecDim] = roundUp(static_cast<int32_t>(dims.d[vecDim]), comps);
         }
         return tensorrt_buffer::volume(dims) * std::max(batch, 1);
     }

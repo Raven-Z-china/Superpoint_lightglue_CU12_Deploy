@@ -7,13 +7,13 @@ import numpy as np
 import onnx
 import onnxruntime
 import torch
-import lightglue
+import custom_lightglue
 from utils import to_numpy, normalize_keypoints
 
 
 def main():
     parser = argparse.ArgumentParser(description='script to convert lightglue model from pytorch to onnx')
-    parser.add_argument('--weight_file', default="../weights/superpoint_lightglue.pth",
+    parser.add_argument('--weight_file', default=None,
                         help="pytorch weight file (.pth)")
     parser.add_argument('--output_dir', default="../weights/", help="output directory")
     args = parser.parse_args()
@@ -38,7 +38,7 @@ def main():
         "weights": weight_file,
     }
 
-    lightglue_model = lightglue.LightGlue("superpoint", depth_confidence=lightglue_conf["depth_confidence"],
+    lightglue_model = custom_lightglue.LightGlue("superpoint", depth_confidence=lightglue_conf["depth_confidence"],
                                           width_confidence=lightglue_conf["width_confidence"],
                                           weights=lightglue_conf["weights"]).eval()
     pytorch_total_params = sum(p.numel() for p in lightglue_model.parameters())
@@ -74,7 +74,11 @@ def main():
     descriptors1 = torch.randn(1, 512, 256)
 
     torch_infer_output = lightglue_model(keypoints0, keypoints1, descriptors0, descriptors1)
-    onnx_filename = os.path.join(output_dir, weight_file.split("/")[-1].split(".")[0] + ".onnx")
+
+    if weight_file is not None:
+        onnx_filename = os.path.join(output_dir, weight_file.split("/")[-1].split(".")[0] + "_lg.onnx")
+    else:
+        onnx_filename = os.path.join(output_dir, "offical_lg.onnx")
 
     torch.onnx.export(lightglue_model,
                       (keypoints0, keypoints1, descriptors0, descriptors1),
@@ -93,7 +97,11 @@ def main():
                           "descriptors0": {1: "feature_number_0"},
                           "descriptors1": {1: "feature_number_1"},
                       },
+                      dynamo=False, 
                       )
+    
+
+    print(f"save path:{onnx_filename}")
 
     # Check onnx conversion.
     onnx_model = onnx.load(onnx_filename)

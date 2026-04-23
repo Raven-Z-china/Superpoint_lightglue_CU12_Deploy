@@ -28,10 +28,12 @@
 //! Samples that use TRT at link time can define DEFINE_TRT_ENTRYPOINTS before including this header to
 //! pick up the definitions here.
 
-#include "NvCaffeParser.h"
 #include "NvInfer.h"
 #include "NvOnnxParser.h"
+#if NV_TENSORRT_MAJOR < 10
+#include "NvCaffeParser.h"
 #include "NvUffParser.h"
+#endif
 #include "logger.h"
 
 extern nvinfer1::IBuilder* createBuilder();
@@ -40,11 +42,13 @@ extern nvinfer1::IRefitter* createRefitter(nvinfer1::ICudaEngine& engine);
 
 extern nvonnxparser::IParser* createONNXParser(nvinfer1::INetworkDefinition& network);
 
+#if NV_TENSORRT_MAJOR < 10
 extern nvcaffeparser1::ICaffeParser* sampleCreateCaffeParser();
 extern void shutdownCaffeParser();
 
 extern nvuffparser::IUffParser* sampleCreateUffParser();
 extern void shutdownUffParser();
+#endif
 
 #if !defined(DEFINE_TRT_ENTRYPOINTS)
 #define DEFINE_TRT_ENTRYPOINTS 0
@@ -64,7 +68,11 @@ extern void shutdownUffParser();
 #define DEFINE_TRT_ONNX_PARSER_ENTRYPOINT 1
 #endif
 #if !defined(DEFINE_TRT_LEGACY_PARSER_ENTRYPOINT)
+#if NV_TENSORRT_MAJOR >= 10
+#define DEFINE_TRT_LEGACY_PARSER_ENTRYPOINT 0
+#else
 #define DEFINE_TRT_LEGACY_PARSER_ENTRYPOINT 1
+#endif
 #endif
 
 #if DEFINE_TRT_ENTRYPOINTS

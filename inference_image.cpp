@@ -34,10 +34,7 @@ int main(int argc, char **argv) {
 
   cv::resize(image0, image0, cv::Size(width, height));
   cv::resize(image1, image1, cv::Size(width, height));
-  std::cout << "First image size: " << std::to_string(image0.cols) << "x" << std::to_string(image0.rows) << std::endl;
-  std::cout << "Second image size: " << std::to_string(image1.cols) << "x" << std::to_string(image1.rows) << std::endl;
 
-  std::cout << "Building Inference Engine......" << std::endl;
   auto superpoint = std::make_shared<SuperPoint>(configs.superpoint_config);
   if (!superpoint->build()) {
     std::cerr << "Error in SuperPoint building engine. Please check your onnx model path." << std::endl;
@@ -48,73 +45,38 @@ int main(int argc, char **argv) {
     std::cerr << "Error in SuperPoint-LightGlue building engine. Please check your onnx model path." << std::endl;
     return 0;
   }
-  std::cout << "SuperPoint and SuperPoint-LightGlue inference engine build success." << std::endl;
 
   Eigen::Matrix<double, 258, Eigen::Dynamic> feature_points0, feature_points1;
   Eigen::Matrix<double, 1, Eigen::Dynamic> feature_scores0, feature_scores1;
   std::vector<cv::DMatch> lightglue_matches;
 
-  long image0_time_count = 0;
-  long image1_time_count = 0;
-  long match_time_count = 0;
-  std::cout << "SuperPoint and LightGlue test in 100 times." << std::endl;
-  for (int i = 0; i < 100; ++i) {
-    std::cout << "---------------------------------------------------------" << std::endl;
-    auto start = std::chrono::high_resolution_clock::now();
-    if (!superpoint->infer(image0, feature_points0, feature_scores0)) {
-      std::cerr << "Failed when extracting features from first image." << std::endl;
-      return 0;
-    }
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    if (i > 0) {
-      std::cout << "First image feature points number: " << feature_points0.cols() << std::endl;
-      image0_time_count += duration.count();
-      std::cout << "First image infer cost " << image0_time_count / i / 1000.0 << " MS" << std::endl;
-    }
-    start = std::chrono::high_resolution_clock::now();
-    if (!superpoint->infer(image1, feature_points1, feature_scores1)) {
-      std::cerr << "Failed when extracting features from second image." << std::endl;
-      return 0;
-    }
-    end = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    if (i > 0) {
-      std::cout << "Second image feature points number: " << feature_points1.cols() << std::endl;
-      image1_time_count += duration.count();
-      std::cout << "Second image infer cost " << image1_time_count / i / 1000.0 << " MS" << std::endl;
-    }
+  // Run inference once
+  if (!superpoint->infer(image0, feature_points0, feature_scores0)) {
+    std::cerr << "Failed when extracting features from first image." << std::endl;
+    return 0;
+  }
 
-    start = std::chrono::high_resolution_clock::now();
+  if (!superpoint->infer(image1, feature_points1, feature_scores1)) {
+    std::cerr << "Failed when extracting features from second image." << std::endl;
+    return 0;
+  }
+
+  superpoint_lightglue->matching_points(feature_points0, feature_points1, lightglue_matches);
+
+  // Benchmark: run 100 times for timing
+  const int num_runs = 100;
+  auto start = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < num_runs; ++i) {
+    superpoint->infer(image0, feature_points0, feature_scores0);
+    superpoint->infer(image1, feature_points1, feature_scores1);
     superpoint_lightglue->matching_points(feature_points0, feature_points1, lightglue_matches);
-    end = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    if (i > 0) {
-      match_time_count += duration.count();
-      std::cout << "Match image cost " << match_time_count / i / 1000.0 << " MS" << std::endl;
-    }
   }
-
-  cv::Mat match_image;
-  std::vector<cv::KeyPoint> keypoints0, keypoints1;
-  for (size_t i = 0; i < feature_points0.cols(); ++i) {
-    double score = feature_scores0(0, i);
-    double x = feature_points0(0, i);
-    double y = feature_points0(1, i);
-    keypoints0.emplace_back(x, y, 8, -1, score);
-  }
-  for (size_t i = 0; i < feature_points1.cols(); ++i) {
-    double score = feature_scores1(0, i);
-    double x = feature_points1(0, i);
-    double y = feature_points1(1, i);
-    keypoints1.emplace_back(x, y, 8, -1, score);
-  }
-
-  //  cv::drawMatches(image0, keypoints0, image1, keypoints1, lightglue_matches, match_image);
-  //  cv::imwrite("match_image.png", match_image);
-  //  visualize
-  //  cv::imshow("match_image", match_image);
-  //  cv::waitKey(-1);
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+  
+  std::cout << "Feature points: " << feature_points0.cols() << " / " << feature_points1.cols() << std::endl;
+  std::cout << "Matches: " << lightglue_matches.size() << std::endl;
+  std::cout << "Average time: " << duration.count() / static_cast<double>(num_runs) << " ms" << std::endl;
 
   return 0;
 }

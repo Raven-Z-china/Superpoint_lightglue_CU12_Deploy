@@ -3,6 +3,7 @@
 //
 #include "super_point.h"
 
+#include <cmath>
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include <unordered_map>
@@ -11,12 +12,19 @@
 using namespace tensorrt_log;
 using namespace tensorrt_buffer;
 
-SuperPoint::SuperPoint(SuperPointConfig super_point_config) : super_point_config_(std::move(super_point_config)), engine_(nullptr) { setReportableSeverity(Logger::Severity::kINTERNAL_ERROR); }
+SuperPoint::SuperPoint(SuperPointConfig super_point_config) : super_point_config_(std::move(super_point_config)), engine_(nullptr) { setReportableSeverity(Logger::Severity::kWARNING); }
 
 bool SuperPoint::build() {
+#if NV_TENSORRT_MAJOR >= 10
+  // Try to deserialize existing engine first for TensorRT 10
   if (deserialize_engine()) {
     return true;
   }
+#else
+  if (deserialize_engine()) {
+    return true;
+  }
+#endif
   auto builder = TensorRTUniquePtr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(gLogger.getTRTLogger()));
   if (!builder) {
     return false;
@@ -46,25 +54,32 @@ bool SuperPoint::build() {
 
   auto constructed = construct_network(builder, network, config, parser);
   if (!constructed) {
+    std::cerr << "[BUILD ERROR] construct_network failed" << std::endl;
     return false;
   }
+  std::cerr << "[BUILD] Network constructed, building serialized network..." << std::endl;
   auto profile_stream = makeCudaStream();
   if (!profile_stream) {
     return false;
   }
   config->setProfileStream(*profile_stream);
+  std::cerr << "[BUILD] Building serialized network..." << std::endl;
   TensorRTUniquePtr<nvinfer1::IHostMemory> plan{builder->buildSerializedNetwork(*network, *config)};
   if (!plan) {
+    std::cerr << "[BUILD ERROR] buildSerializedNetwork failed" << std::endl;
     return false;
   }
+  std::cerr << "[BUILD] Serialized network size: " << plan->size() << " bytes" << std::endl;
   TensorRTUniquePtr<nvinfer1::IRuntime> runtime{nvinfer1::createInferRuntime(gLogger.getTRTLogger())};
   if (!runtime) {
     return false;
   }
   engine_ = std::shared_ptr<nvinfer1::ICudaEngine>(runtime->deserializeCudaEngine(plan->data(), plan->size()));
   if (!engine_) {
+    std::cerr << "[BUILD ERROR] deserializeCudaEngine failed" << std::endl;
     return false;
   }
+  std::cerr << "[BUILD] Engine deserialized successfully" << std::endl;
   save_engine();
   ASSERT(network->getNbInputs() == 1);
   input_dims_ = network->getInput(0)->getDimensions();
@@ -74,6 +89,9 @@ bool SuperPoint::build() {
   ASSERT(semi_dims_.nbDims == 3);
   desc_dims_ = network->getOutput(1)->getDimensions();
   ASSERT(desc_dims_.nbDims == 4);
+#if NV_TENSORRT_MAJOR >= 10
+  // Always rebuild for TensorRT 10
+#endif
   return true;
 }
 
@@ -83,24 +101,61 @@ bool SuperPoint::construct_network(TensorRTUniquePtr<nvinfer1::IBuilder> &builde
   if (!parsed) {
     return false;
   }
-  config->setFlag(nvinfer1::BuilderFlag::kFP16);
+  // Enable FP16 for faster inference
+  // config->setFlag(nvinfer1::BuilderFlag::kFP16);
   enableDLA(builder.get(), config.get(), super_point_config_.dla_core);
   return true;
 }
 
 bool SuperPoint::infer(const cv::Mat &image, Eigen::Matrix<double, 258, Eigen::Dynamic> &features, Eigen::Matrix<double, 1, Eigen::Dynamic> &features_score) {
+  // For TensorRT 10, reuse context if already created
+#if NV_TENSORRT_MAJOR >= 10
   if (!context_) {
     context_ = TensorRTUniquePtr<nvinfer1::IExecutionContext>(engine_->createExecutionContext());
     if (!context_) {
       return false;
     }
   }
+#else
+  if (!context_) {
+    context_ = TensorRTUniquePtr<nvinfer1::IExecutionContext>(engine_->createExecutionContext());
+    if (!context_) {
+      return false;
+    }
+  }
+#endif
 
+#if NV_TENSORRT_MAJOR >= 10
+  assert(engine_->getNbIOTensors() == 3);
+
+  if (!context_->setInputShape(super_point_config_.input_tensor_names[0].c_str(), nvinfer1::Dims4(1, 1, image.rows, image.cols))) {
+    std::cerr << "Error: setInputShape failed!" << std::endl;
+    return false;
+  }
+  
+  // Get actual output dimensions after setting input shape
+  nvinfer1::Dims output_scores_dims = context_->getTensorShape(super_point_config_.output_tensor_names[0].c_str());
+  nvinfer1::Dims output_desc_dims = context_->getTensorShape(super_point_config_.output_tensor_names[1].c_str());
+  
+  // Update semi_dims_ and desc_dims_ for current input size
+  semi_dims_.nbDims = output_scores_dims.nbDims;
+  for (int i = 0; i < output_scores_dims.nbDims; i++) {
+    semi_dims_.d[i] = output_scores_dims.d[i];
+  }
+  
+  desc_dims_.nbDims = output_desc_dims.nbDims;
+  for (int i = 0; i < output_desc_dims.nbDims; i++) {
+    desc_dims_.d[i] = output_desc_dims.d[i];
+  }
+#else
   assert(engine_->getNbBindings() == 3);
 
   const int input_index = engine_->getBindingIndex(super_point_config_.input_tensor_names[0].c_str());
 
   context_->setBindingDimensions(input_index, nvinfer1::Dims4(1, 1, image.rows, image.cols));
+  semi_dims_ = context_->getBindingDimensions(0);
+  desc_dims_ = context_->getBindingDimensions(1);
+#endif
 
   BufferManager buffers(engine_, 0, context_.get());
 
@@ -108,12 +163,37 @@ bool SuperPoint::infer(const cv::Mat &image, Eigen::Matrix<double, 258, Eigen::D
   if (!process_input(buffers, image)) {
     return false;
   }
-  buffers.copyInputToDevice();
 
+#if NV_TENSORRT_MAJOR >= 10
+  // TensorRT 10: Set tensor addresses before execution
+  for (int i = 0; i < engine_->getNbIOTensors(); ++i) {
+    const char* name = engine_->getIOTensorName(i);
+    void* buffer = buffers.getDeviceBuffer(name);
+    if (!context_->setTensorAddress(name, buffer)) {
+      std::cerr << "Error: setTensorAddress failed for " << name << std::endl;
+      return false;
+    }
+  }
+  buffers.copyInputToDevice();
+  
+  // Pass bindings directly to executeV2
+  std::vector<void*> bindings;
+  for (int i = 0; i < engine_->getNbIOTensors(); ++i) {
+    bindings.push_back(buffers.getDeviceBuffer(engine_->getIOTensorName(i)));
+  }
+  bool status = context_->executeV2(bindings.data());
+  if (!status) {
+    std::cerr << "Error: executeV2 failed" << std::endl;
+    return false;
+  }
+#else
+  buffers.copyInputToDevice();
   bool status = context_->executeV2(buffers.getDeviceBindings().data());
+#endif
   if (!status) {
     return false;
   }
+
   buffers.copyOutputToHost();
   if (!process_output(buffers, features, features_score)) {
     return false;
@@ -122,13 +202,15 @@ bool SuperPoint::infer(const cv::Mat &image, Eigen::Matrix<double, 258, Eigen::D
 }
 
 bool SuperPoint::process_input(const BufferManager &buffers, const cv::Mat &image) {
+  // Update dimensions for current image size
   input_dims_.d[2] = image.rows;
   input_dims_.d[3] = image.cols;
-  semi_dims_.d[1] = image.rows;
-  semi_dims_.d[2] = image.cols;
-  desc_dims_.d[1] = 256;
-  desc_dims_.d[2] = image.rows / 8;
-  desc_dims_.d[3] = image.cols / 8;
+  
+  // semi_dims_ and desc_dims_ are already set correctly from build() based on ONNX model
+  // Do NOT override them - they reflect the model's output shape
+  // semi_dims_: [1, 1, H*8, W*8] for scores
+  // desc_dims_: [1, 256, H/8, W/8] for descriptors
+  
   auto *host_data_buffer = static_cast<float *>(buffers.getHostBuffer(super_point_config_.input_tensor_names[0]));
 
   for (int row = 0; row < image.rows; ++row) {
@@ -328,18 +410,23 @@ bool SuperPoint::deserialize_engine() {
     char *model_stream = new char[size];
     file.read(model_stream, size);
     file.close();
+    std::cerr << "deserialize_engine: Engine file loaded, size=" << size << std::endl;
     nvinfer1::IRuntime *runtime = nvinfer1::createInferRuntime(gLogger);
     if (runtime == nullptr) {
+      std::cerr << "deserialize_engine: createInferRuntime failed" << std::endl;
       delete[] model_stream;
       return false;
     }
     engine_ = std::shared_ptr<nvinfer1::ICudaEngine>(runtime->deserializeCudaEngine(model_stream, size));
     if (engine_ == nullptr) {
+      std::cerr << "deserialize_engine: deserializeCudaEngine failed" << std::endl;
       delete[] model_stream;
       return false;
     }
     delete[] model_stream;
+    std::cerr << "deserialize_engine: Success!" << std::endl;
     return true;
   }
+  std::cerr << "deserialize_engine: Could not open engine file: " << super_point_config_.engine_file << std::endl;
   return false;
 }

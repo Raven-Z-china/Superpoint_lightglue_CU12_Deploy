@@ -43,6 +43,10 @@ class SuperPointLightGlue {
   nvinfer1::Dims descriptors_0_dims_{};
   nvinfer1::Dims keypoints_1_dims_{};
   nvinfer1::Dims descriptors_1_dims_{};
+#if NV_TENSORRT_MAJOR >= 10
+  int scores_rows_{0};
+  int scores_cols_{0};
+#endif
 
   std::shared_ptr<nvinfer1::ICudaEngine> engine_;
   std::shared_ptr<nvinfer1::IExecutionContext> context_;

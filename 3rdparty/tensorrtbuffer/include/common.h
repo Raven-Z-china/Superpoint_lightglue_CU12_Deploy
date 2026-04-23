@@ -29,7 +29,11 @@
 #endif
 
 #include "NvInfer.h"
+#if NV_TENSORRT_MAJOR < 10
 #include "NvInferPlugin.h"
+#else
+#include "NvInferRuntimePlugin.h"
+#endif
 #include "logger.h"
 #include "sample_entrypoints.h"
 #include <algorithm>

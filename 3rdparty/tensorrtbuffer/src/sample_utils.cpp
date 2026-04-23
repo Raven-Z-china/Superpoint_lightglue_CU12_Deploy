@@ -54,7 +54,7 @@ namespace tensorrt_log
             {
                 d = tensorrt_buffer::divUp(d, comps);
             }
-            maxNbElems = std::max(maxNbElems, d * strides.d[i]);
+            maxNbElems = std::max(maxNbElems, static_cast<int32_t>(d * strides.d[i]));
         }
         return static_cast<int64_t>(maxNbElems) * batch * (vecDim < 0 ? 1 : comps);
     }
@@ -323,8 +323,10 @@ void setSparseWeights(L& l, int32_t k, int32_t trs, std::vector<int8_t>& sparseW
 // Explicit instantiation
 template void setSparseWeights<IConvolutionLayer>(
         IConvolutionLayer& l, int32_t k, int32_t trs, std::vector<int8_t>& sparseWeights);
+#if NV_TENSORRT_MAJOR < 10
 template void setSparseWeights<IFullyConnectedLayer>(
         IFullyConnectedLayer& l, int32_t k, int32_t trs, std::vector<int8_t>& sparseWeights);
+#endif
 
 void sparsify(nvinfer1::INetworkDefinition& network, std::vector<std::vector<int8_t>>& sparseWeights)
 {
@@ -342,6 +344,7 @@ void sparsify(nvinfer1::INetworkDefinition& network, std::vector<std::vector<int
             sparseWeights.emplace_back();
             setSparseWeights(conv, k, trs, sparseWeights.back());
         }
+#if NV_TENSORRT_MAJOR < 10
         else if (t == nvinfer1::LayerType::kFULLY_CONNECTED)
         {
             auto& fc = *static_cast<nvinfer1::IFullyConnectedLayer*>(layer);
@@ -349,6 +352,7 @@ void sparsify(nvinfer1::INetworkDefinition& network, std::vector<std::vector<int
             sparseWeights.emplace_back();
             setSparseWeights(fc, k, 1, sparseWeights.back());
         }
+#endif
     }
 
     sparsifyMatMulKernelWeights(network, sparseWeights);

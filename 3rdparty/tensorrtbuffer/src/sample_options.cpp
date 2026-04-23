@@ -646,9 +646,18 @@ namespace tensorrt_log
             // clang-format off
             switch (feature)
             {
+#if NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR >= 10
+                case PreviewFeature::kPROFILE_SHARING_0806: return "kPROFILE_SHARING_0806 (deprecated)";
+                case PreviewFeature::kALIASED_PLUGIN_IO_10_03: return "kALIASED_PLUGIN_IO_10_03";
+                case PreviewFeature::kRUNTIME_ACTIVATION_RESIZE_10_10: return "kRUNTIME_ACTIVATION_RESIZE_10_10";
+#elif NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR >= 8
+                case PreviewFeature::kPROFILE_SHARING_0806: return "kPROFILE_SHARING_0806";
+                case PreviewFeature::kALIASED_PLUGIN_IO_10_03: return "kALIASED_PLUGIN_IO_10_03";
+#else
                 case PreviewFeature::kFASTER_DYNAMIC_SHAPES_0805: return "kFASTER_DYNAMIC_SHAPES_0805";
                 case PreviewFeature::kDISABLE_EXTERNAL_TACTIC_SOURCES_FOR_CORE_0805: return "kDISABLE_EXTERNAL_TACTIC_SOURCES_FOR_CORE_0805";
                 case PreviewFeature::kPROFILE_SHARING_0806: return "kPROFILE_SHARING_0806";
+#endif
             }
             return "Invalid Preview Feature";
             // clang-format on
@@ -670,9 +679,17 @@ namespace tensorrt_log
                 }
             };
 
+#if NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR >= 10
+            addFlag(PreviewFeature::kALIASED_PLUGIN_IO_10_03);
+            addFlag(PreviewFeature::kRUNTIME_ACTIVATION_RESIZE_10_10);
+#elif NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR >= 8
+            addFlag(PreviewFeature::kPROFILE_SHARING_0806);
+            addFlag(PreviewFeature::kALIASED_PLUGIN_IO_10_03);
+#else
             addFlag(PreviewFeature::kFASTER_DYNAMIC_SHAPES_0805);
             addFlag(PreviewFeature::kDISABLE_EXTERNAL_TACTIC_SOURCES_FOR_CORE_0805);
             addFlag(PreviewFeature::kPROFILE_SHARING_0806);
+#endif
 
             return os;
         }
@@ -1203,6 +1220,7 @@ namespace tensorrt_log
             {
                 feat = PreviewFeature::kPROFILE_SHARING_0806;
             }
+#if NV_TENSORRT_MAJOR < 10
             else if (featureName == "fasterDynamicShapes0805")
             {
                 feat = PreviewFeature::kFASTER_DYNAMIC_SHAPES_0805;
@@ -1211,6 +1229,7 @@ namespace tensorrt_log
             {
                 feat = PreviewFeature::kDISABLE_EXTERNAL_TACTIC_SOURCES_FOR_CORE_0805;
             }
+#endif
             else
             {
                 throw std::invalid_argument(std::string("Unknown preview feature: ") + featureName);

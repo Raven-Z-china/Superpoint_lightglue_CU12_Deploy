@@ -226,6 +226,92 @@ namespace tensorrt_buffer
         HostBuffer hostBuffer;
     };
 
+// TensorRT 10 compatibility: Helper functions
+#if NV_TENSORRT_MAJOR >= 10
+    inline int getBindingIndex(nvinfer1::ICudaEngine* engine, const char* tensorName)
+    {
+        int nbTensors = engine->getNbIOTensors();
+        for (int i = 0; i < nbTensors; i++)
+        {
+            if (strcmp(engine->getIOTensorName(i), tensorName) == 0)
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    inline nvinfer1::Dims getBindingDimensions(nvinfer1::ICudaEngine* engine, int index)
+    {
+        return engine->getTensorShape(engine->getIOTensorName(index));
+    }
+
+    inline nvinfer1::Dims getBindingDimensions(nvinfer1::IExecutionContext* context, int index, nvinfer1::ICudaEngine* engine)
+    {
+        if (context)
+        {
+            return context->getTensorShape(engine->getIOTensorName(index));
+        }
+        return getBindingDimensions(engine, index);
+    }
+
+    inline nvinfer1::DataType getBindingDataType(nvinfer1::ICudaEngine* engine, int index)
+    {
+        return engine->getTensorDataType(engine->getIOTensorName(index));
+    }
+
+    inline int getBindingVectorizedDim(nvinfer1::ICudaEngine* engine, int index)
+    {
+        return engine->getTensorVectorizedDim(engine->getIOTensorName(index));
+    }
+
+    inline int getBindingComponentsPerElement(nvinfer1::ICudaEngine* engine, int index)
+    {
+        return engine->getTensorBytesPerComponent(engine->getIOTensorName(index)) / tensorrt_buffer::getElementSize(getBindingDataType(engine, index));
+    }
+
+    inline bool bindingIsInput(nvinfer1::ICudaEngine* engine, int index)
+    {
+        return engine->getTensorIOMode(engine->getIOTensorName(index)) == nvinfer1::TensorIOMode::kINPUT;
+    }
+#else
+    // TensorRT 8/9 API - direct calls
+    inline int getBindingIndex(nvinfer1::ICudaEngine* engine, const char* tensorName)
+    {
+        return engine->getBindingIndex(tensorName);
+    }
+
+    inline nvinfer1::Dims getBindingDimensions(nvinfer1::ICudaEngine* engine, int index)
+    {
+        return engine->getBindingDimensions(index);
+    }
+
+    inline nvinfer1::Dims getBindingDimensions(nvinfer1::IExecutionContext* context, int index, nvinfer1::ICudaEngine* engine)
+    {
+        return context ? context->getBindingDimensions(index) : engine->getBindingDimensions(index);
+    }
+
+    inline nvinfer1::DataType getBindingDataType(nvinfer1::ICudaEngine* engine, int index)
+    {
+        return engine->getBindingDataType(index);
+    }
+
+    inline int getBindingVectorizedDim(nvinfer1::ICudaEngine* engine, int index)
+    {
+        return engine->getBindingVectorizedDim(index);
+    }
+
+    inline int getBindingComponentsPerElement(nvinfer1::ICudaEngine* engine, int index)
+    {
+        return engine->getBindingComponentsPerElement(index);
+    }
+
+    inline bool bindingIsInput(nvinfer1::ICudaEngine* engine, int index)
+    {
+        return engine->bindingIsInput(index);
+    }
+#endif
+
 //!
 //! \brief  The BufferManager class handles host and device buffer allocation and deallocation.
 //!
@@ -246,19 +332,48 @@ namespace tensorrt_buffer
                       const nvinfer1::IExecutionContext* context = nullptr)
                 : mEngine(engine)
                 , mBatchSize(batchSize)
+                , mContext(context)
         {
             // Full Dims implies no batch size.
             assert(engine->hasImplicitBatchDimension() || mBatchSize == 0);
             // Create host and device buffers
-            for (int i = 0; i < mEngine->getNbBindings(); i++)
+#if NV_TENSORRT_MAJOR >= 10
+            int nbBindings = mEngine->getNbIOTensors();
+#else
+            int nbBindings = mEngine->getNbBindings();
+#endif
+            for (int i = 0; i < nbBindings; i++)
             {
-                auto dims = context ? context->getBindingDimensions(i) : mEngine->getBindingDimensions(i);
+                // In TensorRT 10, use context dimensions if context is provided and shape has been set
+#if NV_TENSORRT_MAJOR >= 10
+                nvinfer1::Dims dims;
+                bool isInput = bindingIsInput(mEngine.get(), i);
+                if (mContext != nullptr) {
+                    dims = mContext->getTensorShape(mEngine->getIOTensorName(i));
+                } else {
+                    dims = getBindingDimensions(mEngine.get(), i);
+                }
+                
+                // For TensorRT 10 with dynamic shapes, if dims.nbDims is 0 or negative,
+                // this is a dynamic output whose shape depends on input.
+                // Allocate a reasonable maximum buffer size for these cases.
+                if (dims.nbDims <= 0 && !isInput) {
+                    // Use a large default buffer for dynamic outputs
+                    // This assumes the output won't exceed ~2000x2000 matching matrix
+                    dims.nbDims = 3;
+                    dims.d[0] = 1;  // batch
+                    dims.d[1] = 2000;  // max keypoints
+                    dims.d[2] = 2000;  // max keypoints
+                }
+#else
+                auto dims = getBindingDimensions(mEngine.get(), i);
+#endif
                 size_t vol = context || !mBatchSize ? 1 : static_cast<size_t>(mBatchSize);
-                nvinfer1::DataType type = mEngine->getBindingDataType(i);
-                int vecDim = mEngine->getBindingVectorizedDim(i);
+                nvinfer1::DataType type = getBindingDataType(mEngine.get(), i);
+                int vecDim = getBindingVectorizedDim(mEngine.get(), i);
                 if (-1 != vecDim) // i.e., 0 != lgScalarsPerVector
                 {
-                    int scalarsPerVec = mEngine->getBindingComponentsPerElement(i);
+                    int scalarsPerVec = getBindingComponentsPerElement(mEngine.get(), i);
                     dims.d[vecDim] = divUp(dims.d[vecDim], scalarsPerVec);
                     vol *= scalarsPerVec;
                 }
@@ -312,7 +427,7 @@ namespace tensorrt_buffer
         //!
         size_t size(const std::string& tensorName) const
         {
-            int index = mEngine->getBindingIndex(tensorName.c_str());
+            int index = getBindingIndex(mEngine.get(), tensorName.c_str());
             if (index == -1)
                 return kINVALID_SIZE_VALUE;
             return mManagedBuffers[index]->hostBuffer.nbBytes();
@@ -384,7 +499,7 @@ namespace tensorrt_buffer
     private:
         void* getBuffer(const bool isHost, const std::string& tensorName) const
         {
-            int index = mEngine->getBindingIndex(tensorName.c_str());
+            int index = getBindingIndex(mEngine.get(), tensorName.c_str());
             if (index == -1)
                 return nullptr;
             return (isHost ? mManagedBuffers[index]->hostBuffer.data() : mManagedBuffers[index]->deviceBuffer.data());
@@ -392,7 +507,12 @@ namespace tensorrt_buffer
 
         void memcpyBuffers(const bool copyInput, const bool deviceToHost, const bool async, const cudaStream_t& stream = 0)
         {
-            for (int i = 0; i < mEngine->getNbBindings(); i++)
+#if NV_TENSORRT_MAJOR >= 10
+            int nbBindings = mEngine->getNbIOTensors();
+#else
+            int nbBindings = mEngine->getNbBindings();
+#endif
+            for (int i = 0; i < nbBindings; i++)
             {
                 void* dstPtr
                         = deviceToHost ? mManagedBuffers[i]->hostBuffer.data() : mManagedBuffers[i]->deviceBuffer.data();
@@ -400,7 +520,7 @@ namespace tensorrt_buffer
                         = deviceToHost ? mManagedBuffers[i]->deviceBuffer.data() : mManagedBuffers[i]->hostBuffer.data();
                 const size_t byteSize = mManagedBuffers[i]->hostBuffer.nbBytes();
                 const cudaMemcpyKind memcpyType = deviceToHost ? cudaMemcpyDeviceToHost : cudaMemcpyHostToDevice;
-                if ((copyInput && mEngine->bindingIsInput(i)) || (!copyInput && !mEngine->bindingIsInput(i)))
+                if ((copyInput && bindingIsInput(mEngine.get(), i)) || (!copyInput && !bindingIsInput(mEngine.get(), i)))
                 {
                     if (async)
                         CHECK(cudaMemcpyAsync(dstPtr, srcPtr, byteSize, memcpyType, stream));
@@ -412,6 +532,7 @@ namespace tensorrt_buffer
 
         std::shared_ptr<nvinfer1::ICudaEngine> mEngine;              //!< The pointer to the engine
         int mBatchSize;                                              //!< The batch size for legacy networks, 0 otherwise.
+        const nvinfer1::IExecutionContext* mContext;                //!< The execution context for TensorRT 10 dynamic shapes
         std::vector<std::unique_ptr<ManagedBuffer>> mManagedBuffers; //!< The vector of pointers to managed buffers
         std::vector<void*> mDeviceBindings;                          //!< The vector of device buffers needed for engine execution
     };
