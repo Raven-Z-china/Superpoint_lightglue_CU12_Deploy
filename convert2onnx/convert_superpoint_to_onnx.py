@@ -75,7 +75,6 @@ def main():
         input_names=['image'],  # the model input names
         output_names=['scores', 'descriptors'],  # the model output names
         dynamic_axes={'image': {2: 'image_height', 3: "image_width"}},  # dynamic input names
-        dynamo=False,  # IMPORTANT: disable new dynamo exporter for compatibility
     )
 
     print(f"save path:{onnx_filename}")

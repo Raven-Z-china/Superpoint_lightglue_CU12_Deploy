@@ -97,7 +97,6 @@ def main():
                           "descriptors0": {1: "feature_number_0"},
                           "descriptors1": {1: "feature_number_1"},
                       },
-                      dynamo=False, 
                       )
     
 
